@@ -38,6 +38,7 @@ on:
     branches: [main]
     paths:
       - "overlay/**"
+      - "files/**"
       - ".github/workflows/build.yml"
 
 env:

@@ -19,6 +19,7 @@ Cudy TR3600 v1 的固件。
 | **風扇恆全速、完全不受控** | Kwrt 的 `devices/mediatek_filogic/patches/tr3600.patch` 把 pwm-fan 掛在 **PWM1 + `pwm1_pins`（groups = `pwm1_0`）**，而 `pwm1_0` 是 **PWM1@PIN7，與 JTAG 共用**。實機風扇在 **PWM0@PIN13**。掛錯時驅動照樣 bind、cooling device 照樣出現、`cur_state` 照樣會動（**會騙人**），但 PWM0 從未被 claim，停在 idle 準位 → 風扇全速且不受控。 | `zz-tr3600-fixes.patch`：改 `pwms = <&pwm 0 50000 0>` + `pinctrl-0 = <&pwm_pins>` |
 | **風扇 idle 也在轉（>40 °C 就 50 %）** | `mt7987.dtsi` 把 **40 °C trip 對到 fan cooling level 1** → 只要 SoC 超過 40 °C 就 50 % 常轉（= 永遠）。 | 曲線移到 **68 / 78 / 88 °C** + `cooling-levels = <0 128 200 255>` |
 | **USB 4G 網卡插上沒網路** | Kwrt **完全沒給這張卡建立介面**：沒有 `/lib/network/wwan/<vid>:<pid>` profile → `/etc/hotplug.d/usb/00_wwan.sh` 第一行測試就 `exit 0`；且映像裡**根本沒有 usbnet 系列 kmod**。 | `.config` 加 usbnet kmod；`uci-defaults` 建立 `network.tether`；`hotplug.d/net` 掛上實際 netdev 名 |
+| **升完固件 LuCI 版面看起來不對** | Kwrt 的 nginx 對 `/luci-static/` **完全沒有送 `Cache-Control`** → 瀏覽器改用啟發式新鮮度（RFC 9111：約 `Last-Modified` 起算時間的 10 %，實測可達數小時不重驗）。而 `luci-theme-vantage` 的 cache-buster 綁的是**主題版本**：`cbi.js?v=1.0.4`、`vantage.css?v=1.0.4` —— 這兩個 URL **永遠不變**，即使 `luci-base` 換版也一樣。兩者相加 → 瀏覽器可能長時間跑上一版的 CSS/JS。 | `uci-defaults` 冪等地在 `location /luci-static` 內加 `add_header Cache-Control "no-cache";` |
 
 ---
 
@@ -30,7 +31,7 @@ overlay/devices/mediatek_filogic/
 └── .config                          # 只編 cudy_tr3600-v1 + usbnet kmod
 
 files/
-├── uci-defaults/99-tr3600-defaults      # 開機一次的板級預設（風扇 + tether）
+├── uci-defaults/99-tr3600-defaults      # 開機一次的板級預設（風扇 + tether + nginx 快取標頭）
 └── hotplug.d/net/25-tr3600-usb-tether   # USB netdev 出現時指向 tether 介面
 
 .github/workflows/build.yml              # GitHub Actions 建置線
@@ -89,6 +90,10 @@ cat /sys/class/thermal/cooling_device0/max_state     # 3
 # 4. USB tether 介面存在且掛在 wan zone
 uci show network.tether
 uci show firewall | grep tether
+
+# 5. LuCI 靜態資源要送 Cache-Control（修掉「升完固件版面不對」）
+curl -s -D - -o /dev/null "http://127.0.0.1/luci-static/resources/cbi.js?v=1.0.4" \
+  | grep -i cache-control          # 要看到 Cache-Control: no-cache
 ```
 
 ---
