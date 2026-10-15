@@ -1,0 +1,16 @@
+--- a/scripts/gen_netgear_rootfs_node.sh
++++ b/scripts/gen_netgear_rootfs_node.sh
+@@ -18,6 +18,13 @@
+ # See also: scripts/mkits.sh, which generates the main FIT .its source.
+ 
+ ROOTFS_FILE="$1"
++if [ ! -f "${ROOTFS_FILE}" ]
++then
++	# No per-device rootfs image yet (device left unselected, or the rootfs
++	# target has not run).  Emit no node instead of a malformed one, which
++	# would abort mkimage with "Unable to parse input tree".
++	exit 0
++fi
+ ROOTFS_SIZE=$(stat -c %s "${ROOTFS_FILE}")
+ ROOTFS_SHA1=$(
+     sha1sum "${ROOTFS_FILE}" | awk '{ print "<0x" substr($0, 1, 8) \
