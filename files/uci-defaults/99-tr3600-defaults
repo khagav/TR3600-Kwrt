@@ -1,0 +1,71 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 board defaults for the Kwrt (openwrt.ai) build.
+# Runs once on first boot of every newly flashed image.
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name)" = "cudy,tr3600-v1" ] || exit 0
+
+# ---------------------------------------------------------------------------
+# Fan: keep the LuCI fan app in sync with the DTS thermal ramp.
+#
+# /usr/libexec/fan-control (shipped by luci-app-fan, started by
+# /etc/init.d/luci-fan at S20) finds the LOWEST writable active trip point of
+# the fan thermal zone and overwrites its temperature with on_temp from
+# /etc/config/luci-fan - on every single boot.  The stock default is 58 C,
+# which would silently undo the 68 C first step in our DTS and leave the fan
+# running at 50 % whenever the board is above 58 C, i.e. at idle.
+#
+# Setting on_temp to 68 C makes the rewrite a no-op.  off_temp is only used to
+# compute the hysteresis; trip_point_N_hyst is read-only once the trip has
+# been used, so that write fails harmlessly either way.
+# ---------------------------------------------------------------------------
+if uci -q get luci-fan.@luci-fan[0] >/dev/null; then
+	uci -q set luci-fan.@luci-fan[0].enabled='1'
+	uci -q set luci-fan.@luci-fan[0].on_temp='68'
+	uci -q set luci-fan.@luci-fan[0].off_temp='63'
+	uci -q commit luci-fan
+fi
+
+# ---------------------------------------------------------------------------
+# USB cellular dongle.
+#
+# Kwrt ships no /lib/network/wwan/<vid>:<pid> profile for these devices, so
+# /etc/hotplug.d/usb/00_wwan.sh exits on its very first test and the dongle
+# never gets an interface: no DHCP, no default route, no NAT.
+#
+# netifd tracks device hotplug itself, so a plain dhcp interface bound to the
+# dongle's netdev is enough - it comes up when the device appears and recovers
+# on its own after a link drop.  The netdev name depends on enumeration order,
+# so /etc/hotplug.d/net/25-tr3600-usb-tether re-points it whenever a USB
+# ethernet device shows up.
+# ---------------------------------------------------------------------------
+if ! uci -q get network.tether >/dev/null; then
+	uci -q set network.tether=interface
+	uci -q set network.tether.proto='dhcp'
+	uci -q set network.tether.force_link='0'
+	uci -q set network.tether.metric='30'
+	uci -q set network.tether.peerdns='1'
+	uci -q set network.tether.defaultroute='1'
+	uci -q set network.tether.device='eth2'
+	uci -q commit network
+fi
+
+# Put it in the (masqueraded) wan zone, but only once.
+i=0
+while uci -q get "firewall.@zone[$i]" >/dev/null; do
+	if [ "$(uci -q get "firewall.@zone[$i].name")" = "wan" ]; then
+		case " $(uci -q get "firewall.@zone[$i].network") " in
+			*" tether "*)
+				;;
+			*)
+				uci -q add_list "firewall.@zone[$i].network=tether"
+				uci -q commit firewall
+				;;
+		esac
+		break
+	fi
+	i=$((i + 1))
+done
+
+exit 0

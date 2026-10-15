@@ -1,0 +1,107 @@
+Cudy TR3600 v1: fix the PWM fan channel and the thermal ramp (Kwrt)
+
+Apply AFTER the Kwrt patch series (file name sorts last, "zz-").
+
+Kwrt's tr3600.patch wires the pwm-fan to PWM channel 1 and selects the
+pwm1_pins group (groups = "pwm1_0"), which on MT7987 is PWM1@PIN7 - a pin
+shared with JTAG.  On the real board the fan sits on PWM0@PIN13, driven by
+the pwm_pins group that mt7987.dtsi already defines.
+
+With the wrong channel the driver binds, the cooling device appears and
+cur_state still changes, so nothing looks broken - but PWM0 is never
+claimed, sits at its idle level and the fan runs at full speed with no
+control at all.  Verified on hardware: /sys/kernel/debug/pwm must list
+"pwm-0 (pwm-fan)"; with the Kwrt binding it lists "pwm-1 (pwm-fan)" and
+pwm-0 is owned by sysfs only.
+
+Second fix: mt7987.dtsi maps the 40 C trip to fan cooling level 1, so the
+fan runs at 50 % whenever the SoC is above 40 C - i.e. always.  The ramp is
+moved to 68/78/88 C with 5 C hysteresis and cooling-levels
+<0 128 200 255> (off / 50 % / 78 % / 100 %).
+
+Signed-off-by: TR3600-Kwrt <noreply@example.com>
+---
+diff --git a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts
+--- a/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts	2026-10-15 08:24:41.000000000 +0800
++++ b/target/linux/mediatek/dts/mt7987b-cudy-tr3600-v1.dts	2026-10-15 08:24:41.000000000 +0800
+@@ -82,7 +82,16 @@
+ 
+ &fan {
+ 	fan-supply = <&fan_3p3v>;
+-	pwms = <&pwm 1 50000 0>;
++	/*
++	 * The fan is wired to PWM0 (PIN13), not PWM1.  pwm1_0 is PWM1@PIN7,
++	 * a pin shared with JTAG, so with the upstream binding the pwm-fan
++	 * driver still binds and a cooling device still appears - but PWM0 is
++	 * never claimed, stays at its idle level and the fan runs at full
++	 * speed, uncontrolled.  pwm_pins (group "pwm0") is what this board
++	 * needs and mt7987.dtsi already defines it.
++	 */
++	pwms = <&pwm 0 50000 0>;
++	cooling-levels = <0 128 200 255>;
+ 	status = "okay";
+ };
+ 
+@@ -159,18 +168,9 @@
+ 	};
+ };
+ 
+-&pio {
+-	pwm1_pins: pwm1-pins {
+-		mux {
+-			function = "pwm";
+-			groups = "pwm1_0";
+-		};
+-	};
+-};
+-
+ &pwm {
+ 	pinctrl-names = "default";
+-	pinctrl-0 = <&pwm1_pins>;
++	pinctrl-0 = <&pwm_pins>;
+ 	status = "okay";
+ };
+ 
+@@ -277,3 +277,42 @@
+ 	pinctrl-0 = <&uart0_pins>;
+ 	status = "okay";
+ };
++
++/*
++ * mt7987.dtsi points the 40 C trip at fan cooling level 1, so with the stock
++ * table the fan runs at 50 % from 40 C upwards - that is, permanently.  This
++ * board idles around 55-64 C with the fan stopped, so the whole ramp is moved
++ * up: silent at idle, audible only under real load.
++ *
++ *   < 68 C : off
++ *   68 C   : level 1, PWM 128 (50 %)
++ *   78 C   : level 2, PWM 200 (78 %)
++ *   88 C   : level 3, PWM 255 (100 %)
++ *
++ * Measured on the board with each level forced for 80 s: level 1 at 25 %
++ * (PWM 64) cannot cool at all (63.7 C vs 64.1 C with the fan off), which is
++ * why the upstream 50 % step is kept instead of a gentler first step.
++ *
++ * cooling-levels keeps four entries because the upstream cooling-maps and the
++ * LuCI fan app both assume levels 0..3.  The 88 C top step still leaves 29 C
++ * to the 117 C CPU-throttling trip and 37 C to the 125 C critical trip, so
++ * this is an idle-noise fix, not a cooling downgrade.
++ */
++&cpu_thermal {
++	trips {
++		cpu_trip_active_low: active-low {
++			temperature = <68000>;
++			hysteresis = <5000>;
++		};
++
++		cpu_trip_active_med: active-med {
++			temperature = <78000>;
++			hysteresis = <5000>;
++		};
++
++		cpu_trip_active_high: active-high {
++			temperature = <88000>;
++			hysteresis = <5000>;
++		};
++	};
++};
