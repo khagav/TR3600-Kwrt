@@ -274,7 +274,8 @@ jobs:
           path: |
             kwrt/openwrt/bin/targets/mediatek/filogic/*tr3600*
             kwrt/openwrt/bin/targets/mediatek/filogic/sha256sums
-            kwrt/openwrt/bin/targets/mediatek/filogic/profiles.json
+            kwrt/openwrt/bin/targets/mediatek/filogic/profiles.json*
+            kwrt/openwrt/bin/targets/mediatek/filogic/*.manifest
             kwrt/openwrt/bin/targets/mediatek/filogic/*.config
             kwrt/openwrt/bin/targets/mediatek/filogic/*_kernel.config
 
