@@ -32,12 +32,12 @@ mkdir -p "$B" 2>/dev/null
 log() { logger -t tr3600-wwatch "$*"; }
 
 # ---- config ----------------------------------------------------------------
-enabled=1; thresh=2; target="223.5.5.5 8.8.8.8"; allow_reboot=0
-if [ -f /etc/config/tr3600 ]; then
-	eval "$(uci -q -n show tr3600.wwatch 2>/dev/null | sed -n 's/^tr3600\.wwatch\.//p')"
-fi
-enabled="${enabled:-1}"; thresh="${thresh:-2}"
-target="${target:-223.5.5.5 8.8.8.8}"; allow_reboot="${allow_reboot:-0}"
+# Read each key explicitly (uci show+-n is not a portable combo; explicit get
+# also fails safe back to the defaults below if the section is absent).
+enabled="$(uci -q get tr3600.wwatch.enabled 2>/dev/null)";  enabled="${enabled:-1}"
+thresh="$(uci -q get  tr3600.wwatch.thresh 2>/dev/null)";   thresh="${thresh:-2}"
+target="$(uci -q get  tr3600.wwatch.target 2>/dev/null)";   target="${target:-223.5.5.5 8.8.8.8}"
+allow_reboot="$(uci -q get tr3600.wwatch.allow_reboot 2>/dev/null)"; allow_reboot="${allow_reboot:-0}"
 [ "$enabled" = "1" ] || exit 0
 
 # ---- helpers ---------------------------------------------------------------
