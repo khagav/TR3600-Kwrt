@@ -33,7 +33,13 @@ overlay/devices/mediatek_filogic/
 └── .config                          # 只編 cudy_tr3600-v1 + usbnet kmod
 
 files/
-├── uci-defaults/99-tr3600-defaults      # 開機一次的板級預設（風扇 + tether + nginx 快取標頭）
+├── uci-defaults/
+│   ├── 99-tr3600-defaults      # 開機一次的板級預設（風扇 + tether + nginx 快取標頭）
+│   └── 98-tr3600-extras        # 啟用 4G 自愈看門狗 + 寫入 /etc/config/tr3600 預設
+├── etc/init.d/
+│   └── tr3600-4g-wwatch        # 每分鐘排程 4G 看門狗（cron；同原廠 autoreboot 風格）
+├── usr/sbin/
+│   └── tr3600-4g-wwatch        # 4G 自愈階梯：重撥 → USB 重枚舉(usb3en/重 enumerate, 等價 usb_power_restart) → 選配重啟
 └── hotplug.d/net/
     ├── 25-tr3600-usb-tether   # USB netdev 出現時指向 tether 介面（4G wan）
     └── 30-tr3600-usb-lan      # 有線 USB 網卡橋進 br-lan（內建 LAN 燒壞時的軟體繞過）
