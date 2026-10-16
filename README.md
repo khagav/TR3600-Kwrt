@@ -20,6 +20,7 @@ Cudy TR3600 v1 的固件。
 | **風扇 idle 也在轉（>40 °C 就 50 %）** | `mt7987.dtsi` 把 **40 °C trip 對到 fan cooling level 1** → 只要 SoC 超過 40 °C 就 50 % 常轉（= 永遠）。 | 曲線移到 **68 / 78 / 88 °C** + `cooling-levels = <0 128 200 255>` |
 | **USB 4G 網卡插上沒網路** | Kwrt **完全沒給這張卡建立介面**：沒有 `/lib/network/wwan/<vid>:<pid>` profile → `/etc/hotplug.d/usb/00_wwan.sh` 第一行測試就 `exit 0`；且映像裡**根本沒有 usbnet 系列 kmod**。 | `.config` 加 usbnet kmod；`uci-defaults` 建立 `network.tether`；`hotplug.d/net` 掛上實際 netdev 名 |
 | **升完固件 LuCI 版面看起來不對** | Kwrt 的 nginx 對 `/luci-static/` **完全沒有送 `Cache-Control`** → 瀏覽器改用啟發式新鮮度（RFC 9111：約 `Last-Modified` 起算時間的 10 %，實測可達數小時不重驗）。而 `luci-theme-vantage` 的 cache-buster 綁的是**主題版本**：`cbi.js?v=1.0.4`、`vantage.css?v=1.0.4` —— 這兩個 URL **永遠不變**，即使 `luci-base` 換版也一樣。兩者相加 → 瀏覽器可能長時間跑上一版的 CSS/JS。 | `uci-defaults` 冪等地在 `location /luci-static` 內加 `add_header Cache-Control "no-cache";` |
+| **內建 LAN 口（eth1）物理燒壞** | 對端短路（發燙的 USB 轉網口适配器）可能燒掉 RJ45/網變。軟體無法喚活死硬體，且 TR3600 硬體只有 2 個網口（eth0=WAN / eth1=LAN），沒有第 3 個可補。 | **軟體繞過**：`.config` 加 `kmod-usb-net-r8152` + `kmod-usb-net-asix`；`hotplug.d/net/30-tr3600-usb-lan` 把 RTL8153 / AX88179 這類**有線** USB 網卡橋進 `br-lan` 當 LAN 口（明確排除 4G tether 用的 `cdc_ether`/`rndis`/`qmi_wwan` 等，避免迴圈）。插上好的 dongle 即成一個可用的有線 LAN 口。 |
 | **`target/linux failed to build`（mkimage 罵 `.its` syntax error）** | `CONFIG_TARGET_PER_DEVICE_ROOTFS=y` 讓 image machinery 為 target 裡**每一個** device 展開 recipe，包含我們沒選的。`target/linux/mediatek/image/filogic.mk:13` 對 Netgear 裝置呼叫 `gen_netgear_rootfs_node.sh …/root.squashfs$(if $(TARGET_PER_DEVICE_ROOTFS),+pkg=$(ROOTFS_ID/$(DEVICE_NAME)))`，而 `ROOTFS_ID/<dev>` **只有在 profile 選中時才被定義**（`include/image.mk:608-611`）→ `netgear_eax17` 拿到的路徑變成不存在的 `root.squashfs+pkg=` → `.its` 節點是空的 → `mkimage: FATAL ERROR: Unable to parse input tree`。 | ① `.config` 把 `CONFIG_TARGET_PER_DEVICE_ROOTFS` 改 **n**；② `01-tr3600-netgear-rootfs-guard.patch` 讓 `gen_netgear_rootfs_node.sh` 在 rootfs 映像不存在時 `exit 0`（不產生畸形節點） |
 
 ---
@@ -33,7 +34,9 @@ overlay/devices/mediatek_filogic/
 
 files/
 ├── uci-defaults/99-tr3600-defaults      # 開機一次的板級預設（風扇 + tether + nginx 快取標頭）
-└── hotplug.d/net/25-tr3600-usb-tether   # USB netdev 出現時指向 tether 介面
+└── hotplug.d/net/
+    ├── 25-tr3600-usb-tether   # USB netdev 出現時指向 tether 介面（4G wan）
+    └── 30-tr3600-usb-lan      # 有線 USB 網卡橋進 br-lan（內建 LAN 燒壞時的軟體繞過）
 
 .github/workflows/build.yml              # GitHub Actions 建置線
 ```

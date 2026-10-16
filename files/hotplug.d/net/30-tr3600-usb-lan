@@ -1,0 +1,73 @@
+#!/bin/sh
+#
+# Cudy TR3600 v1 / Kwrt: turn a USB wired-Ethernet dongle into a LAN port.
+#
+# Software repair for a physically damaged on-board LAN (eth1): plug a USB
+# 3.0 GbE adapter (Realtek RTL8153 -> driver "r8152", or ASIX AX88179 ->
+# driver "ax88179_178a"/"asix") into the TR3600's USB port and it is bridged
+# into br-lan, giving a working wired LAN port with the normal 10.0.0.0/24
+# DHCP server and firewall (lan zone).
+#
+# CRITICAL: this must only act on WIRED USB-Ethernet adapters.  The USB 4G
+# tether (Air780EPM) enumerates as cdc_ether and is handled by
+# 25-tr3600-usb-tether as the wan-side "tether" interface.  Bridging that
+# into br-lan would create a loop and break the default route, so devices
+# whose driver is cdc_ether / rndis / qmi_wwan / cdc_ncm / cdc_mbim are
+# explicitly excluded.
+
+[ "$ACTION" = "add" ] || exit 0
+[ -n "$INTERFACE" ] || exit 0
+
+[ -f /tmp/sysinfo/board_name ] || exit 0
+[ "$(cat /tmp/sysinfo/board_name)" = "cudy,tr3600-v1" ] || exit 0
+
+# Only USB-attached netdevs: walk up the device path for a USB idVendor.
+d="$(readlink -f "/sys/class/net/$INTERFACE/device" 2>/dev/null)"
+found=
+while [ -n "$d" ] && [ "$d" != "/" ]; do
+	if [ -f "$d/idVendor" ]; then
+		found=1
+		break
+	fi
+	d="$(dirname "$d")"
+done
+[ -n "$found" ] || exit 0
+
+# Restrict to wired USB-Ethernet dongle drivers.  The 4G tether (cdc_ether,
+# rndis, qmi_wwan, cdc_ncm, cdc_mbim) is deliberately NOT in this list.
+drv="$(basename "$(readlink -f "/sys/class/net/$INTERFACE/device/driver" 2>/dev/null)" 2>/dev/null)"
+case "$drv" in
+	r8152|ax88179_178a|asix) ;;
+	*) exit 0 ;;
+esac
+
+# Already a bridge member?  Then nothing to do.
+if [ -n "$(bridge link show dev "$INTERFACE" 2>/dev/null)" ]; then
+	exit 0
+fi
+
+# Sanity: br-lan must exist.
+if ! ip link show br-lan >/dev/null 2>&1; then
+	logger -t tr3600-usblan "br-lan missing, cannot bridge $INTERFACE ($drv)"
+	exit 0
+fi
+
+logger -t tr3600-usblan "USB $drv dongle $INTERFACE -> br-lan (LAN)"
+ip link set "$INTERFACE" up 2>/dev/null
+ip link set "$INTERFACE" master br-lan 2>/dev/null
+
+# Persist the port in the bridge device's port list so a later
+# "reload_config" / uci change does not drop it.  The hotplug re-adds it on
+# every plug/boot anyway, so this is best-effort only.
+brdev="$(uci -q show network 2>/dev/null | sed -n 's/^\(network\.@device\[[0-9]\]\+\).name=.br-lan.$/\1/p' | head -1)"
+if [ -n "$brdev" ]; then
+	case " $(uci -q get "$brdev.ports" 2>/dev/null) " in
+		*" $INTERFACE "*) ;;
+		*)
+			uci -q add_list "$brdev.ports=$INTERFACE"
+			uci -q commit network
+			;;
+	esac
+fi
+
+exit 0
